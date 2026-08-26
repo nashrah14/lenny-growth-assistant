@@ -45,7 +45,7 @@ class SessionNotFoundError(EntityNotFoundError):
     def __init__(self, session_id: str):
         super().__init__(
             message=f"Session with ID '{session_id}' was not found.",
-            details={"session_id": str(session_id)},
+            details={"session_id": session_id},
             error_code="SESSION_NOT_FOUND"
         )
 
@@ -55,7 +55,7 @@ class ArtifactNotFoundError(EntityNotFoundError):
     def __init__(self, artifact_id: str):
         super().__init__(
             message=f"Artifact with ID '{artifact_id}' was not found.",
-            details={"artifact_id": str(artifact_id)},
+            details={"artifact_id": artifact_id},
             error_code="ARTIFACT_NOT_FOUND"
         )
 

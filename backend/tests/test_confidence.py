@@ -14,7 +14,7 @@ from backend.app.agents.skills.rag import (
 )
 
 
-def _make_candidate(score: float, episode_title: str = "Episode A", chunk_id: str = None):
+def _make_candidate(score: float, episode_title: str = "Episode A", chunk_id: str | None = None):
     """Helper: create a mock RetrievalCandidate."""
     c = MagicMock()
     c.score = score

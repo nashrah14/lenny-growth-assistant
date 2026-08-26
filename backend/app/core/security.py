@@ -50,7 +50,7 @@ def create_access_token(
         expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     payload: Dict[str, Any] = {
-        "sub": str(user_id),
+        "sub": user_id,
         "email": email.strip().lower(),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp())
