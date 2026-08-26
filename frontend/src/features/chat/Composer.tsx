@@ -55,7 +55,7 @@ export const Composer: React.FC<ComposerProps> = ({ onSendMessage, isLoading }) 
         }}
       >
         {/* Intent Chips */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={() => setSelectedIntent('NORMAL_QA')}

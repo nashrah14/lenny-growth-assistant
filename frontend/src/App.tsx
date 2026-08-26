@@ -64,16 +64,28 @@ function MainApp() {
         isArtifactViewerOpen={isArtifactViewerOpen}
         onToggleArtifactViewer={toggleArtifactViewer}
         systemStatus={systemStatus}
+        onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
       />
 
       {/* Main 3-Column Layout */}
-      <div style={{ display: 'flex', flex: 1, height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
+      <div className="app-main-layout" style={{ display: 'flex', flex: 1, height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
+        {/* Backdrop for mobile drawer */}
+        {!isSidebarCollapsed && (
+          <div className="sidebar-backdrop" onClick={() => setIsSidebarCollapsed(true)} />
+        )}
+
         {/* Left: Sidebar */}
         <Sidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
-          onSelectSession={setActiveSessionId}
-          onNewChat={() => createNewSession()}
+          onSelectSession={(id) => {
+            setActiveSessionId(id);
+            setIsSidebarCollapsed(true); // Close sidebar on mobile after selecting chat
+          }}
+          onNewChat={() => {
+            createNewSession();
+            setIsSidebarCollapsed(true); // Close sidebar on mobile after creating new chat
+          }}
           onDeleteSession={deleteSession}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}

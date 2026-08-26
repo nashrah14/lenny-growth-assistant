@@ -38,6 +38,7 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ artifact, onClos
 
   return (
     <aside
+      className="artifact-viewer-responsive"
       style={{
         width: '560px',
         maxWidth: '50vw',

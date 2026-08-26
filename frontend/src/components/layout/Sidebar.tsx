@@ -23,6 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   return (
     <aside
+      className={`sidebar-responsive ${isCollapsed ? 'collapsed' : ''}`}
       style={{
         width: isCollapsed ? '60px' : '260px',
         background: 'var(--bg-sidebar)',

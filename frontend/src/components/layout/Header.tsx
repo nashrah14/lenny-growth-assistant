@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Bot, Cpu, Layers, LogOut, User as UserIcon } from 'lucide-react';
+import { Sparkles, Bot, Cpu, Layers, LogOut, User as UserIcon, Menu } from 'lucide-react';
 import { User } from '../../types';
 
 interface HeaderProps {
@@ -11,6 +11,7 @@ interface HeaderProps {
   isArtifactViewerOpen: boolean;
   onToggleArtifactViewer: () => void;
   systemStatus: string;
+  onToggleSidebar?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   isArtifactViewerOpen,
   onToggleArtifactViewer,
   systemStatus,
+  onToggleSidebar,
 }) => {
   return (
     <header
@@ -37,8 +39,19 @@ export const Header: React.FC<HeaderProps> = ({
         zIndex: 10,
       }}
     >
-      {/* Brand & Title */}
+      {/* Brand & Title (with Hamburger on Mobile) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {onToggleSidebar && (
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={onToggleSidebar}
+            title="Toggle Sidebar"
+          >
+            <Menu size={18} />
+          </button>
+        )}
+        
         <div
           style={{
             width: '32px',
@@ -56,9 +69,10 @@ export const Header: React.FC<HeaderProps> = ({
           <Sparkles size={18} />
         </div>
         <div>
-          <h1 style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <h1 className="header-brand-text" style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             The Lenny Growth Assistant
             <span
+              className="header-badge"
               style={{
                 fontSize: '10px',
                 background: 'rgba(245, 158, 11, 0.15)',
@@ -166,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
               }}
             >
               <UserIcon size={14} color="var(--accent-amber)" />
-              <span style={{ fontWeight: 500, maxWidth: '120px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span className="user-profile-name" style={{ fontWeight: 500, maxWidth: '120px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.name}
               </span>
             </div>
@@ -196,7 +210,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
               >
                 <LogOut size={14} />
-                <span>Logout</span>
+                <span className="logout-btn-text">Logout</span>
               </button>
             )}
           </div>
