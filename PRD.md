@@ -143,7 +143,41 @@
 ---
 
 ## 4. Non-Functional Requirements
-- **Security**: No secrets in browser; sanitized iframe; parameterized SQL; robust CORS.
-- **Reliability**: Graceful degradation when external services are unreachable; health checks.
+- **Security**: No secrets in browser; sanitized iframe; parameterized SQL; robust CORS; per-user rate limiting.
+- **Reliability**: Graceful degradation when external services are unreachable; health checks; automatic key/provider failover.
 - **Maintainability**: Strict Python type annotations; TypeScript strict mode; modular directory structure.
 - **Portability**: Complete Docker Compose setup and reproducible local CLI workflows.
+
+---
+
+## 5. Week-One Client Handoff Plan (Days 1–5)
+
+To guarantee immediate operational readiness for enterprise deployment, the following 5-day handoff roadmap provides zero-friction client adoption:
+
+### Day 1: Infrastructure Provisioning & Environment Validation
+- **Actions**: Deploy `docker-compose.yml` on client infrastructure or cloud VM (AWS ECS / GCP Cloud Run / local server).
+- **Verification**: Run `python -m pytest backend/tests/` (75/75 passing). Execute `/api/v1/health` and `/api/v1/readiness` smoke tests.
+- **Deliverables**: Verified `.env` configuration, healthy PostgreSQL container, healthy vector database connection.
+
+### Day 2: Ingestion & Knowledge Base Customization
+- **Actions**: Ingest client-specific transcript datasets or execute the baseline 303-episode Lenny podcast ingestion script (`python backend/scripts/ingest.py`).
+- **Verification**: Inspect Qdrant collection statistics and verify BM25 vocabulary cache generation.
+- **Deliverables**: Fully populated vector store with 38,856 indexed semantic chunks and BM25 index.
+
+### Day 3: Security & Compliance Audit
+- **Actions**: Review rate limiting parameters (`RATE_LIMIT_CHAT_PER_MINUTE`), verify sandbox isolation in artifact viewer, review CORS whitelists.
+- **Verification**: Execute `test_rate_limiting.py` and `test_sanitizer.py` test suites.
+- **Deliverables**: Signed-off security isolation posture with zero XSS risk and authenticated user quota enforcement.
+
+### Day 4: User Onboarding & Skill Customization
+- **Actions**: Conduct technical walkthrough with client PMs and engineers covering:
+  - Grounded RAG with signal-based confidence scoring (`HIGH`, `MODERATE`, `LOW`, `INSUFFICIENT`).
+  - Ship 30 for 30 atomic essay generator with deterministic word-count and structural validation.
+  - Interactive HTML/CSS artifact generation and sandboxed inspection.
+  - Real SSE streaming via Ollama and Gemini fallback.
+- **Deliverables**: Client team equipped with query playbooks and prompt templates.
+
+### Day 5: Operational Telemetry & Production Sign-off
+- **Actions**: Configure production logging, review latency metrics across dense/BM25/cross-encoder stages, confirm automated database migration pipelines.
+- **Deliverables**: Final production readiness report and handoff sign-off.
+

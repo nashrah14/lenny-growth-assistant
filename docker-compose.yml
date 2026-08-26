@@ -1,48 +1,101 @@
 version: '3.8'
 
+# ============================================================
+# The Lenny Growth Assistant — Docker Compose Configuration
+# Fresh-clone → configure .env → docker compose up → running application
+# ============================================================
+#
+# Prerequisites:
+#   - Docker Engine 24+
+#   - Docker Compose v2
+#   - Copy .env.example → .env and fill in your secrets
+#     (GEMINI_API_KEY, QDRANT_URL, QDRANT_API_KEY, JWT_SECRET_KEY)
+#
+# Quick Start:
+#   cp .env.example .env   # edit secrets
+#   docker compose up --build
+#
+# Reset database:
+#   docker compose down -v && docker compose up --build
+# ============================================================
+
 services:
+
+  # ─────────────────────────────────────────────────────────
+  # PostgreSQL 16 — Relational Database (managed in-compose)
+  # ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: lenny-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-lenny_assistant}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"           # Internal only — not exposed to host by default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-lenny_assistant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - lenny-net
+
+  # ─────────────────────────────────────────────────────────
   # FastAPI Backend Application
+  # ─────────────────────────────────────────────────────────
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: lenny-backend
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-    restart: unless-stopped
+      # Override DATABASE_URL to point at the compose postgres service
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-lenny_assistant}
+    depends_on:
+      postgres:
+        condition: service_healthy   # Waits until pg_isready confirms DB is accepting connections
+    networks:
+      - lenny-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
+  # ─────────────────────────────────────────────────────────
   # React + TypeScript Frontend SPA
+  # ─────────────────────────────────────────────────────────
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
     container_name: lenny-frontend
+    restart: unless-stopped
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
-      - backend
-    restart: unless-stopped
-
-  # Optional Local PostgreSQL Container (used if not connecting to existing host DB)
-  # To enable, run: docker compose --profile local-db up
-  postgres:
-    image: postgres:16-alpine
-    container_name: lenny-postgres
-    profiles: ["local-db"]
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: lenny_assistant
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
+      backend:
+        condition: service_healthy
+    networks:
+      - lenny-net
 
 volumes:
   pgdata:
+    driver: local
+
+networks:
+  lenny-net:
+    driver: bridge

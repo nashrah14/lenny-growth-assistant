@@ -1,10 +1,12 @@
 """
 Ollama Remote / Local LLM Provider Implementation
 Communicates asynchronously with Ollama's HTTP API (/api/chat).
+Supports both batch and true token-by-token streaming via NDJSON.
 """
+import json
 import time
 import httpx
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 from backend.app.llm.base import LLMProvider, LLMMessage, LLMResponse
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
@@ -37,6 +39,31 @@ class OllamaProvider(LLMProvider):
     def default_model(self) -> str:
         return self.model_name
 
+    def _build_payload(
+        self,
+        messages: List[LLMMessage],
+        temperature: float,
+        max_tokens: Optional[int],
+        system_instruction: Optional[str],
+        model: str,
+        stream: bool
+    ) -> dict:
+        formatted_messages = []
+        if system_instruction:
+            formatted_messages.append({"role": "system", "content": system_instruction})
+        for msg in messages:
+            formatted_messages.append({"role": msg.role, "content": msg.content})
+
+        payload: dict = {
+            "model": model,
+            "messages": formatted_messages,
+            "stream": stream,
+            "options": {"temperature": temperature}
+        }
+        if max_tokens:
+            payload["options"]["num_predict"] = max_tokens
+        return payload
+
     async def generate(
         self,
         messages: List[LLMMessage],
@@ -47,25 +74,7 @@ class OllamaProvider(LLMProvider):
     ) -> LLMResponse:
         target_model = model or self.model_name
         start_time = time.perf_counter()
-
-        formatted_messages = []
-        if system_instruction:
-            formatted_messages.append({"role": "system", "content": system_instruction})
-
-        for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": msg.content})
-
-        payload = {
-            "model": target_model,
-            "messages": formatted_messages,
-            "stream": False,
-            "options": {
-                "temperature": temperature
-            }
-        }
-        if max_tokens:
-            payload["options"]["num_predict"] = max_tokens
-
+        payload = self._build_payload(messages, temperature, max_tokens, system_instruction, target_model, stream=False)
         url = f"{self.base_url}/api/chat"
 
         try:
@@ -136,6 +145,83 @@ class OllamaProvider(LLMProvider):
             raise LLMProviderError(
                 message=f"Ollama generation failed: {str(e)}",
                 details={"provider": "ollama", "model": target_model, "original_error": str(e)}
+            )
+
+    async def generate_stream(
+        self,
+        messages: List[LLMMessage],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Real token-by-token streaming from Ollama's /api/chat endpoint.
+
+        Ollama streams NDJSON: each line is a JSON object with a 'message.content'
+        field containing the next token, and 'done: true' on the final line.
+
+        Design decisions:
+        - Uses httpx async streaming with iter_lines() so we never buffer the
+          entire response in memory.
+        - Malformed JSON lines are skipped with a warning rather than crashing.
+        - Connection failures and timeouts raise LLMProviderError/LLMTimeoutError
+          which are handled by the SSE endpoint in the route layer.
+        - Empty content tokens (e.g. punctuation-only chunks) are still yielded
+          faithfully — filtering is the client's responsibility.
+        """
+        target_model = model or self.model_name
+        payload = self._build_payload(messages, temperature, max_tokens, system_instruction, target_model, stream=True)
+        url = f"{self.base_url}/api/chat"
+
+        logger.info(
+            f"Ollama streaming started (model: {target_model})",
+            extra={"operation": "llm_stream_start", "provider": "ollama", "model": target_model}
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=float(self.timeout_seconds)) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                f"Ollama stream: malformed JSON chunk skipped: {line[:80]}",
+                                extra={"operation": "llm_stream_chunk_error", "provider": "ollama"}
+                            )
+                            continue
+
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield token
+
+                        if chunk.get("done", False):
+                            logger.info(
+                                f"Ollama stream complete",
+                                extra={"operation": "llm_stream_done", "provider": "ollama", "model": target_model}
+                            )
+                            break
+
+        except httpx.TimeoutException:
+            raise LLMTimeoutError(
+                message=f"Ollama streaming timed out after {self.timeout_seconds}s (model: {target_model}).",
+                details={"provider": "ollama", "model": target_model, "base_url": self.base_url}
+            )
+        except httpx.ConnectError as e:
+            raise LLMProviderError(
+                message=f"Could not connect to Ollama at {self.base_url} for streaming.",
+                details={"provider": "ollama", "base_url": self.base_url, "error": str(e)}
+            )
+        except httpx.HTTPStatusError as e:
+            error_details = f"HTTP {e.response.status_code}"
+            raise LLMProviderError(
+                message=f"Ollama streaming failed: {error_details}",
+                details={"provider": "ollama", "model": target_model, "url": url}
             )
 
     async def health(self) -> bool:

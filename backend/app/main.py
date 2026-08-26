@@ -1,6 +1,6 @@
 """
 FastAPI Main Application Entry Point
-Configures CORS, Request-ID tracing, lifespan handlers, exception handling, and API routing.
+Configures CORS, Request-ID tracing, Rate Limiting, lifespan handlers, exception handling, and API routing.
 """
 import uuid
 import time
@@ -9,10 +9,12 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from slowapi.errors import RateLimitExceeded
 
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging, logger
 from backend.app.core.exceptions import AppException
+from backend.app.core.limiter import limiter
 from backend.app.db.session import init_db
 from backend.app.api.routes import api_v1_router
 
@@ -22,6 +24,12 @@ async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle management."""
     setup_logging(settings.LOG_LEVEL)
     logger.info(f"Starting {settings.APP_NAME} in [{settings.APP_ENV}] mode", extra={"operation": "app_startup"})
+    logger.info(
+        f"Rate limits — chat: {settings.RATE_LIMIT_CHAT_PER_MINUTE}/min, "
+        f"auth: {settings.RATE_LIMIT_AUTH_PER_MINUTE}/min, "
+        f"storage: {settings.RATE_LIMIT_STORAGE_URI}",
+        extra={"operation": "rate_limit_config"}
+    )
     
     # Initialize database tables
     try:
@@ -43,6 +51,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Attach limiter to app state (required by slowapi)
+app.state.limiter = limiter
+
 # ----------------- Middleware -----------------
 
 # CORS Middleware
@@ -52,7 +63,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID"]
+    expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"]
 )
 
 # Request ID & Latency Tracing Middleware
@@ -83,6 +94,33 @@ async def request_tracing_middleware(request: Request, call_next):
 
 
 # ----------------- Exception Handlers -----------------
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded):
+    """Return a structured JSON 429 with Retry-After information."""
+    req_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    retry_after = getattr(exc, "retry_after", 60)
+    logger.warning(
+        f"Rate limit exceeded: {exc.detail}",
+        extra={"request_id": req_id, "route": request.url.path}
+    )
+    response = JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many requests. Please wait before trying again.",
+                "details": {
+                    "limit": str(exc.detail),
+                    "retry_after_seconds": retry_after,
+                    "request_id": req_id
+                }
+            }
+        }
+    )
+    response.headers["Retry-After"] = str(retry_after)
+    return response
+
 
 @app.exception_handler(AppException)
 async def domain_exception_handler(request: Request, exc: AppException):

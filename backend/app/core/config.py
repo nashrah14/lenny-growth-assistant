@@ -91,6 +91,15 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 800
     CHUNK_OVERLAP: int = 120
 
+    # Rate Limiting Configuration
+    # Applied per authenticated user (chat) or per IP (auth endpoints)
+    RATE_LIMIT_CHAT_PER_MINUTE: int = 20       # chat endpoint: N requests/minute/user
+    RATE_LIMIT_AUTH_PER_MINUTE: int = 10       # login/signup: N requests/minute/IP
+    RATE_LIMIT_STORAGE_URI: str = "memory://"  # use redis://host:6379 in multi-process deployments
+
+    # Ollama Streaming Configuration
+    OLLAMA_STREAMING_ENABLED: bool = True      # True = real SSE token streaming; False = batch
+
     # Transcripts Dataset Path
     TRANSCRIPTS_DIR: str = str(
         WORKSPACE_ROOT / "lennys-podcast-transcripts-main" / "lennys-podcast-transcripts-main" / "episodes"

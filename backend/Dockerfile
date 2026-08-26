@@ -1,9 +1,9 @@
-# Backend Dockerfile for The Lenny Growth Assistant
+# Backend Dockerfile — The Lenny Growth Assistant
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system build dependencies
+# Install system build dependencies (curl needed for compose healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -18,10 +18,14 @@ COPY backend/ /app/backend/
 COPY data/ /app/data/
 COPY lennys-podcast-transcripts-main/ /app/lennys-podcast-transcripts-main/
 
+# Make entrypoint executable
+RUN chmod +x /app/backend/entrypoint.sh
+
 ENV PYTHONPATH=/app
 ENV PORT=8000
 ENV HOST=0.0.0.0
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# entrypoint.sh runs Alembic migrations then starts uvicorn
+ENTRYPOINT ["/app/backend/entrypoint.sh"]

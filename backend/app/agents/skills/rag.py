@@ -1,6 +1,29 @@
 """
 Grounded RAG Question-Answering Skill (Normal QA)
 Synthesizes answers strictly from retrieved podcast transcript passages with source attribution.
+
+Confidence Scoring Model
+------------------------
+Confidence is derived ONLY from observable retrieval and evidence signals —
+NOT from an arbitrary LLM-generated percentage.
+
+Signals used:
+  1. Source count (n_sources):  More unique, well-ranked sources = stronger evidence base
+  2. Top reranker score:        Cross-encoder score of the top-ranked passage (0.0–1.0)
+  3. Source agreement:          Multiple distinct episodes covering the same claim
+  4. Knowledge-gap detection:   LLM explicitly stated it couldn't find evidence
+
+Thresholds (empirically chosen, documented):
+  HIGH:       n_sources >= 3  AND  top_score >= 0.70
+  MODERATE:   n_sources >= 2  AND  top_score >= 0.45  (or 3+ with any score)
+  LOW:        n_sources >= 1  AND  top_score >= 0.20
+  INSUFFICIENT: n_sources == 0  OR  llm indicated no evidence
+
+Why not a calibrated probability?
+  Cross-encoder scores are not calibrated probabilities. Using raw semantic
+  similarity scores as "percentage confidence" would misrepresent the model's
+  statistical reliability. Instead, this model uses clearly documented threshold
+  buckets that are honest about being heuristic rather than probabilistic.
 """
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
@@ -20,6 +43,95 @@ CRITICAL GROUNDING RULES:
 4. Use clean, professional Markdown formatting with structured headings, bullet points, and bold text for readability.
 5. Provide actionable, nuanced insights reflecting the depth of Lenny's podcast discussions.
 """
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Confidence Scoring
+# ─────────────────────────────────────────────────────────────────────────────
+
+_KNOWLEDGE_GAP_PHRASE = "couldn't find sufficient evidence"
+
+class ConfidenceLevel:
+    HIGH = "HIGH"
+    MODERATE = "MODERATE"
+    LOW = "LOW"
+    INSUFFICIENT = "INSUFFICIENT"
+
+    LABELS = {
+        HIGH: "High — strong supporting evidence from multiple sources",
+        MODERATE: "Moderate — relevant evidence found; some gaps remain",
+        LOW: "Low — limited supporting evidence; treat with caution",
+        INSUFFICIENT: "Insufficient — no reliable evidence found in the knowledge base",
+    }
+
+
+class ConfidenceScore(BaseModel):
+    """
+    Structured confidence metadata attached to every RAG answer.
+
+    Fields:
+      level:          Semantic bucket (HIGH/MODERATE/LOW/INSUFFICIENT)
+      label:          Human-readable description of the confidence level
+      n_sources:      Number of unique, non-duplicate sources retrieved
+      top_score:      Reranker score of the highest-ranked passage (0.0–1.0)
+      distinct_episodes: Number of distinct podcast episodes supporting the answer
+      knowledge_gap:  True if the LLM explicitly reported insufficient evidence
+    """
+    level: str = Field(..., description="HIGH | MODERATE | LOW | INSUFFICIENT")
+    label: str = Field(..., description="Human-readable confidence label")
+    n_sources: int = Field(..., description="Number of unique retrieved sources")
+    top_score: float = Field(..., description="Cross-encoder score of top-ranked source")
+    distinct_episodes: int = Field(..., description="Number of distinct supporting episodes")
+    knowledge_gap: bool = Field(..., description="True if LLM acknowledged knowledge gap")
+
+
+def compute_confidence(
+    candidates: List[RetrievalCandidate],
+    answer_content: str
+) -> ConfidenceScore:
+    """
+    Compute a transparent, signal-based confidence score.
+
+    Inputs:
+      candidates:     Top-k reranked retrieval candidates (in rank order)
+      answer_content: The LLM-generated answer text
+
+    Thresholds:
+      HIGH:         n_sources >= 3 AND top_score >= 0.70
+      MODERATE:     n_sources >= 2 AND top_score >= 0.45
+                    OR n_sources >= 3 (many sources, even with moderate scores)
+      LOW:          n_sources >= 1 AND top_score >= 0.20
+      INSUFFICIENT: n_sources == 0 OR LLM explicitly reported no evidence
+    """
+    n_sources = len(candidates)
+    top_score = candidates[0].score if candidates else 0.0
+    distinct_episodes = len({c.episode_title for c in candidates if c.episode_title})
+    knowledge_gap = _KNOWLEDGE_GAP_PHRASE in answer_content.lower()
+
+    # Knowledge gap always resolves to INSUFFICIENT regardless of retrieval
+    if knowledge_gap or n_sources == 0:
+        level = ConfidenceLevel.INSUFFICIENT
+    elif n_sources >= 3 and top_score >= 0.70:
+        level = ConfidenceLevel.HIGH
+    elif (n_sources >= 2 and top_score >= 0.45) or n_sources >= 3:
+        level = ConfidenceLevel.MODERATE
+    elif n_sources >= 1 and top_score >= 0.20:
+        level = ConfidenceLevel.LOW
+    else:
+        level = ConfidenceLevel.INSUFFICIENT
+
+    return ConfidenceScore(
+        level=level,
+        label=ConfidenceLevel.LABELS[level],
+        n_sources=n_sources,
+        top_score=round(top_score, 4),
+        distinct_episodes=distinct_episodes,
+        knowledge_gap=knowledge_gap
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context Formatting
+# ─────────────────────────────────────────────────────────────────────────────
 
 def format_context_prompt(query: str, candidates: List[RetrievalCandidate]) -> str:
     """Format retrieved transcript chunks into a structured prompt context."""
@@ -46,6 +158,10 @@ def format_context_prompt(query: str, candidates: List[RetrievalCandidate]) -> s
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG Skill
+# ─────────────────────────────────────────────────────────────────────────────
+
 class RAGSkill:
     def __init__(self):
         self.router = llm_router
@@ -61,6 +177,7 @@ class RAGSkill:
         """
         Execute grounded RAG synthesis.
         Returns (answer_content, source_citations, metadata).
+        metadata includes a 'confidence' key with structured ConfidenceScore data.
         """
         user_prompt = format_context_prompt(query, candidates)
 
@@ -98,14 +215,23 @@ class RAGSkill:
                     "snippet": snippet
                 })
 
+        # Compute transparent confidence score
+        confidence = compute_confidence(candidates, response.content)
+
         metadata = {
             "model_provider": response.model_provider,
             "model_name": response.model_name,
             "latency_ms": response.latency_ms,
             "input_tokens": response.input_tokens,
             "output_tokens": response.output_tokens,
-            "grounded": len(candidates) > 0 and "couldn't find sufficient evidence" not in response.content.lower()
+            "grounded": len(candidates) > 0 and not confidence.knowledge_gap,
+            "confidence": confidence.model_dump()
         }
+
+        logger.info(
+            f"RAG answer generated (confidence: {confidence.level}, sources: {confidence.n_sources})",
+            extra={"operation": "rag_complete", "confidence_level": confidence.level, "n_sources": confidence.n_sources}
+        )
 
         return response.content, sources, metadata
 

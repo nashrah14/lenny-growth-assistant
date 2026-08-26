@@ -3,7 +3,7 @@ LLM Provider Base Protocol & Data Models
 Decouples application logic from specific model vendors.
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
 from pydantic import BaseModel, Field
 
 
@@ -48,6 +48,31 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """Generate a complete text response asynchronously."""
         pass
+
+    async def generate_stream(
+        self,
+        messages: List[LLMMessage],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        system_instruction: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream generated text token-by-token as an AsyncGenerator[str, None].
+
+        Default implementation falls back to non-streaming generate() for providers
+        that do not implement real streaming.  Override this in providers that
+        support native streaming (e.g. Ollama).
+        """
+        response = await self.generate(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_instruction=system_instruction,
+            model=model
+        )
+        # Yield the entire content as one chunk (non-streaming fallback)
+        yield response.content
 
     @abstractmethod
     async def health(self) -> bool:
