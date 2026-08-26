@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend Application
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: lenny-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    restart: unless-stopped
+
+  # React + TypeScript Frontend SPA
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: lenny-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Optional Local PostgreSQL Container (used if not connecting to existing host DB)
+  # To enable, run: docker compose --profile local-db up
+  postgres:
+    image: postgres:16-alpine
+    container_name: lenny-postgres
+    profiles: ["local-db"]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: lenny_assistant
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
