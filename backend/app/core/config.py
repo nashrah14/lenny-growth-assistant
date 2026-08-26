@@ -14,7 +14,7 @@ WORKSPACE_ROOT = BASE_DIR.parent
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(str(WORKSPACE_ROOT / ".env"), ".env"),
+        env_file=(str(WORKSPACE_ROOT / ".env"), str(BASE_DIR / ".env"), ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False
